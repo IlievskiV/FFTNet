@@ -33,6 +33,7 @@ def train(epoch):
     else:
         ema = None
     model.train()
+
     for num_iter, batch in enumerate(train_loader):
         start_time = time.time()
         wav = batch[0].unsqueeze(1)
@@ -112,6 +113,7 @@ def main(args):
         avg_val_loss = evaluate(epoch, ema)
         print(" -- loss:{:.5f}\tval_loss:{:.5f}".format(avg_loss, avg_val_loss))
 
+
 if __name__ == "__main__":
 
     torch.manual_seed(1)
@@ -120,10 +122,10 @@ if __name__ == "__main__":
         torch.backends.cudnn.benchmark = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_path', type=str,
-                        help='path to config file for training',)
-    parser.add_argument('--debug', type=bool, default=False,
-                        help='Stop asking for git hash before the run.')
+    parser.add_argument('--config_path', type=str, help='path to config file for training', )
+
+    parser.add_argument('--debug', type=bool, default=False, help='Stop asking for git hash before the run.')
+
     parser.add_argument('--finetune_path', type=str)
     args = parser.parse_args()
     c = load_config(args.config_path)
@@ -135,14 +137,14 @@ if __name__ == "__main__":
     CHECKPOINT_PATH = os.path.join(OUT_PATH, 'checkpoints')
     shutil.copyfile(args.config_path, os.path.join(OUT_PATH, 'config.json'))
 
-    # setup tensorboard
+    # setup TensorBoard
     tb = SummaryWriter(OUT_PATH)
 
-    model = FFTNetModel(hid_channels=256, out_channels=256, n_layers=c.num_quant,
-                        cond_channels=80)
+    # create the FFTNet model
+    model = FFTNetModel(hid_channels=256, out_channels=256, n_layers=c.num_quant, cond_channels=80)
     criterion = MaskedCrossEntropyLoss()
-    # criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=c.lr)
+
     num_params = count_parameters(model)
     print(" > Models has {} parameters".format(num_params))
 
@@ -150,33 +152,24 @@ if __name__ == "__main__":
         model.cuda()
         criterion.cuda()
 
-    train_dataset = LJSpeechDataset(os.path.join(c.data_path, "mels",
-                                                 "meta_fftnet_train.csv"),
-                              os.path.join(c.data_path, "mels"),
-                              c.sample_rate,
-                              c.num_mels, c.num_freq,
-                              c.min_level_db, c.frame_shift_ms,
-                              c.frame_length_ms, c.preemphasis, c.ref_level_db,
-                              c.num_quant, c.min_wav_len, c.max_wav_len, False)
+    # these two classes extend torch.utils.data.Dataset class to create the batches
+    # the batches are tuples of three elements: wav, mels, audio file name
+    train_dataset = LJSpeechDataset(os.path.join(c.data_path, "mels", "meta_fftnet_train.csv"),
+                                    os.path.join(c.data_path, "mels"), c.sample_rate, c.num_mels, c.num_freq,
+                                    c.min_level_db, c.frame_shift_ms, c.frame_length_ms, c.preemphasis, c.ref_level_db,
+                                    c.num_quant, c.min_wav_len, c.max_wav_len, False)
 
-    val_dataset =  LJSpeechDataset(os.path.join(c.data_path, "mels",
-                                               "meta_fftnet_val.csv"),
-                                 os.path.join(c.data_path, "mels"),
-                                 c.sample_rate,
-                                 c.num_mels, c.num_freq,
-                                 c.min_level_db, c.frame_shift_ms,
-                                 c.frame_length_ms, c.preemphasis,
-                                 c.ref_level_db, c.num_quant, c.min_wav_len,
-                                 c.max_wav_len, False)
+    val_dataset = LJSpeechDataset(os.path.join(c.data_path, "mels", "meta_fftnet_val.csv"),
+                                  os.path.join(c.data_path, "mels"), c.sample_rate, c.num_mels, c.num_freq,
+                                  c.min_level_db, c.frame_shift_ms, c.frame_length_ms, c.preemphasis, c.ref_level_db,
+                                  c.num_quant, c.min_wav_len, c.max_wav_len, False)
 
+    # torch.util.data.DataLoader class to load the batches from the Dataset class
+    train_loader = DataLoader(train_dataset, batch_size=c.batch_size, shuffle=False,
+                              collate_fn=train_dataset.collate_fn, drop_last=True, num_workers=c.num_loader_workers)
 
-    train_loader = DataLoader(train_dataset, batch_size=c.batch_size,
-                            shuffle=False, collate_fn=train_dataset.collate_fn,
-                            drop_last=True, num_workers=c.num_loader_workers)
-
-    val_loader = DataLoader(val_dataset, batch_size=c.eval_batch_size,
-                            shuffle=False, collate_fn=train_dataset.collate_fn,
-                            drop_last=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=c.eval_batch_size, shuffle=False,
+                            collate_fn=train_dataset.collate_fn, drop_last=True, num_workers=4)
     try:
         main(args)
         remove_experiment_folder(OUT_PATH)

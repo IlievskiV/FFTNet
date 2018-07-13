@@ -4,6 +4,9 @@ from torch import nn
 
 
 class FFTNetQueue(object):
+    """
+    
+    """
     def __init__(self, batch_size, size, num_channels, cuda=True):
         super(FFTNetQueue, self).__init__()
         self.size = size
@@ -26,26 +29,55 @@ class FFTNetQueue(object):
 
 
 class FFTNet(nn.Module):
+    """
+    A class representing the FFT Layer
+    """
     def __init__(self, in_channels, out_channels, hid_channels, layer_id,
                  cond_channels=None, std_f=0.5):
         super(FFTNet, self).__init__()
         self.layer_id = layer_id
         self.receptive_field = 2**layer_id
         self.K = self.receptive_field // 2
+
+        # the number of channels in the input
         self.in_channels = in_channels
+
+        # the number of filters, or the number of channels in the last convolution output
         self.out_channels = out_channels
+
+        # the number of filters, or the number of channels in the first convolution output
         self.hid_channels = hid_channels
+
+        # the number of channels for the auxiliary input
         self.cond_channels = cond_channels
+
+        # 1x1 convolution layer for the first half
         self.conv1_1 = nn.Conv1d(in_channels, hid_channels, 1, stride=1)
+
+        # 1x1 convolution layer for the second half
         self.conv1_2 = nn.Conv1d(in_channels, hid_channels, 1, stride=1)
+
+        # 1x1 convolution layer for the auxiliary input if any
         if cond_channels is not None:
+            # 1x1 conv layer for the first half of the auxiliary vector
             self.convc1 = nn.Conv1d(cond_channels, hid_channels, 1)
+
+            # 1x1 conv layer for the second half of the auxiliary vector
             self.convc2 = nn.Conv1d(cond_channels, hid_channels, 1)
+
+        # 1x1 conv layer for the second convolution
         self.conv2 = nn.Conv1d(hid_channels, out_channels, 1)
+
+        # ReLu layer
         self.relu = nn.ReLU()
+
+        # initialize weights
         self.init_weights(std_f)
+
+        # No idea
         self.buffer = None
         self.cond_buffer = None
+
         # inference params for linear operations
         self.w1_1 = None
         self.w1_2 = None
@@ -55,6 +87,11 @@ class FFTNet(nn.Module):
             self.wc1_2 = None
 
     def init_weights(self, std_f):
+        """
+        
+        :param std_f: 
+        :return: 
+        """
         std = np.sqrt(std_f / self.in_channels)
         self.conv1_1.weight.data.normal_(mean=0, std=std)
         self.conv1_1.bias.data.zero_()
@@ -69,6 +106,8 @@ class FFTNet(nn.Module):
 
     def forward(self, x, cx=None):
         """
+        
+        
         Shapes:
             inputs: batch x channels x time
             cx: batch x cond_channels x time
@@ -93,6 +132,13 @@ class FFTNet(nn.Module):
         return out
 
     def forward_step(self, x, cx=None):
+        """
+        Forward pass only in inference time to speedup the inference.
+        
+        :param x: waveform
+        :param cx: 
+        :return: 
+        """
         T = x.shape[2]
         B = x.shape[0]
         # linear weights
@@ -133,6 +179,12 @@ class FFTNet(nn.Module):
         return z
 
     def _convert_to_fc_weights(self, conv):
+        """
+        It takes a convolutional layer and it transforms it to Fully-Connected.
+        
+        :param conv: 
+        :return: 
+        """
         w = conv.weight
         out_channels, in_channels, filter_size = w.shape
         nw = w.transpose(1, 2).view(out_channels, -1).contiguous()
@@ -140,6 +192,9 @@ class FFTNet(nn.Module):
 
 
 class FFTNetModel(nn.Module):
+    """
+    The entire FFT Network
+    """
     def __init__(self, hid_channels=256, out_channels=256, n_layers=11,
                  cond_channels=None):
         super(FFTNetModel, self).__init__()
@@ -166,6 +221,7 @@ class FFTNetModel(nn.Module):
             x: batch x 1 x time
             cx: batch x dim x time
         """
+
         # FFTNet modules
         out = x
         for idx, layer in enumerate(self.layers):
@@ -173,11 +229,19 @@ class FFTNetModel(nn.Module):
                 out = layer(out, cx)
             else:
                 out = layer(out)
+
         out = out.transpose(1, 2)
         out = self.fc(out)
         return out
 
     def forward_step(self, x, cx=None):
+        """
+        Only in inference to speedup the process.
+        
+        :param x: 
+        :param cx: 
+        :return: 
+        """
         # FFTNet modules
         out = x
         for idx, layer in enumerate(self.layers):
