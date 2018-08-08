@@ -7,6 +7,7 @@ class FFTNetQueue(object):
     """
     
     """
+
     def __init__(self, batch_size, size, num_channels, cuda=True):
         super(FFTNetQueue, self).__init__()
         self.size = size
@@ -32,11 +33,12 @@ class FFTNet(nn.Module):
     """
     A class representing the FFT Layer
     """
+
     def __init__(self, in_channels, out_channels, hid_channels, layer_id,
                  cond_channels=None, std_f=0.5):
         super(FFTNet, self).__init__()
         self.layer_id = layer_id
-        self.receptive_field = 2**layer_id
+        self.receptive_field = 2 ** layer_id
         self.K = self.receptive_field // 2
 
         # the number of channels in the input
@@ -102,7 +104,6 @@ class FFTNet(nn.Module):
             self.convc1.bias.data.zero_()
             self.convc2.weight.data.normal_(mean=0, std=std)
             self.convc2.bias.data.zero_()
-
 
     def forward(self, x, cx=None):
         """
@@ -195,6 +196,7 @@ class FFTNetModel(nn.Module):
     """
     The entire FFT Network
     """
+
     def __init__(self, hid_channels=256, out_channels=256, n_layers=11,
                  cond_channels=None):
         super(FFTNetModel, self).__init__()
@@ -255,41 +257,150 @@ class FFTNetModel(nn.Module):
 
 
 def sequence_mask(sequence_length):
+    """
+    Generates mask
+    
+    :param torch.Tensor sequence_length         : 1-D tensor for the length of each audio in the batch
+    
+    :return: mask showing which samples from one audio waveform are relevant, because they are all aligned
+        to the same length, containing zeros at the end which should not be included in the loss
+    
+    
+    I need to write an example of what is happening here.
+    
+    sequence_length = [2, 3, 3, 4, 5, 3, 6, 3, 2]
+    
+    max_len = 6
+    
+    batch_size = 9
+    
+    seq_range = [0, 1, 2, 3, 4, 5]
+    seq_range_expand = 
+        [
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 2, 3, 4, 5]
+        ]
+        
+    seq_length_expended = 
+        [
+            [2,  2,  2,  2,  2,  2]
+            [3,  3,  3,  3,  3,  3]
+            [3,  3,  3,  3,  3,  3]
+            [4,  4,  4,  4,  4,  4]
+            [5,  5,  5,  5,  5,  5]
+            [3,  3,  3,  3,  3,  3]
+            [6,  6,  6,  6,  6,  6]
+            [3,  3,  3,  3,  3,  3]
+            [2,  2,  2,  2,  2,  2]
+        ]
+    
+    (seq_range_expand < seq_length_expand).float() = 
+    
+        [
+            [ 1.,  1.,  0.,  0.,  0.,  0.],
+            [ 1.,  1.,  1.,  0.,  0.,  0.],
+            [ 1.,  1.,  1.,  0.,  0.,  0.],
+            [ 1.,  1.,  1.,  1.,  0.,  0.],
+            [ 1.,  1.,  1.,  1.,  1.,  0.],
+            [ 1.,  1.,  1.,  0.,  0.,  0.],
+            [ 1.,  1.,  1.,  1.,  1.,  1.],
+            [ 1.,  1.,  1.,  0.,  0.,  0.],
+            [ 1.,  1.,  0.,  0.,  0.,  0.]
+        ]
+    
+    
+    """
+
+    # determine the max len and the batch size
     max_len = sequence_length.data.max()
     batch_size = sequence_length.size(0)
+
+    # this will generate a sequence of numbers starting from 0 to max_len
     seq_range = torch.arange(0, max_len).long()
+
+    # first make the range a matrix of shape (1, max_len - 1) and then
+    # expand it in a matrix of shape (batch_size, max_len)
     seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
     if sequence_length.is_cuda:
         seq_range_expand = seq_range_expand.cuda()
-    seq_length_expand = sequence_length.unsqueeze(1) \
-        .expand_as(seq_range_expand)
+
+    # expand it in the same shape as the previous matrix
+    seq_length_expand = sequence_length.unsqueeze(1).expand_as(seq_range_expand)
+
     return (seq_range_expand < seq_length_expand).float()
 
 
 class MaskedCrossEntropyLoss(nn.Module):
+    """
+    
+    """
+
     def __init__(self):
         super(MaskedCrossEntropyLoss, self).__init__()
+
+        # since reduce=False, it will return a loss pet batch element
         self.criterion = nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, input, target, lengths=None):
+        """
+        
+        :param torch.Tensor input                   : the predictions from the last linear layer
+        :param torch.Tensor target                  : the samples from the original audio waveform, shifted for one
+        :param torch.Tensor lengths                 : 1-D tensor for the length of each audio in the batch
+        
+        :return: 
+        """
         if lengths is None:
             raise RuntimeError(" > Provide lengths for the loss function")
+
+        # the mask equals the maximal length
         mask = sequence_mask(lengths)
         if target.is_cuda:
             mask = mask.cuda()
+
+        # transform the tensor to different shape such that, -1 means, the dimension will be inferred
+        # the input from (batch_size, num_samples, quantization_levels) will be transformed to
+        # (batch_size x num_samples, quantization_levels). This is a kind of flatenning.
+
         input = input.view([input.shape[0] * input.shape[1], -1])
         target = target.view([target.shape[0] * target.shape[1]])
         mask_ = mask.view([mask.shape[0] * mask.shape[1]])
+
+        # calculate the cross entropy loss between the each row in the input and output
+        # this is due to the reduce=False argument
         losses = self.criterion(input, target)
+
+        # Returns the maximum value of each row of the input tensor in the given dimension dim = 1.
+        # The second return value is the index location of each maximum value found (argmax).
+        # in this case, the index of the quantization level in the prediction
         _, pred = torch.max(input, 1)
+
+        # Convert tensor of boolean to float, where False = 0, True = 1
+        # where the prediction and target do not match
         f = (pred != target).type(torch.FloatTensor)
+
+        # where the prediction and target match
         t = (pred == target).type(torch.FloatTensor)
+
+        # the XoR between f and t should give all 1's
+
         if input.is_cuda:
             f = f.cuda()
             t = t.cuda()
+
         f = (f.squeeze() * mask_).sum()
         t = (t.squeeze() * mask_).sum()
+
+        # total loss, loss for false predicted, loss for correctly predicted
         return ((losses * mask_).sum()) / mask_.sum(), f.item(), t.item()
+
 
 # https://discuss.pytorch.org/t/how-to-apply-exponential-moving-average-decay-for-variables/10856/4
 # https://www.tensorflow.org/api_docs/python/tf/train/ExponentialMovingAverage
@@ -307,10 +418,10 @@ class EMA(object):
         self.shadow[name] -= (1.0 - self.decay) * update_delta
 
     def assign_ema_model(self, model, new_model, cuda):
-       new_model.load_state_dict(model.state_dict())
-       for name, param in new_model.named_parameters():
-           if name in self.shadow:
-               param.data = self.shadow[name].clone()
-       if cuda:
-           new_model.cuda()
-       return new_model
+        new_model.load_state_dict(model.state_dict())
+        for name, param in new_model.named_parameters():
+            if name in self.shadow:
+                param.data = self.shadow[name].clone()
+        if cuda:
+            new_model.cuda()
+        return new_model

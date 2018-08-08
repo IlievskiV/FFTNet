@@ -110,7 +110,7 @@ class LJSpeechDataset(Dataset):
         if isinstance(batch[0], collections.Mapping):
             B = len(batch)
 
-            # determine the longest audio in the. In case the maximum defined length is less than the
+            # the length for each wave in the batch. In case the maximum defined length is less than the
             # actual maximum length in the data set
             pred_lens = [np.minimum(d['wav'].shape[0] - 1, self.max_wav_len - 1) for d in batch]
             max_len = np.max(pred_lens) + self.receptive_field - 1
